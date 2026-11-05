@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ventas OLAP | DuckDB</title>
+<style>
+*{box-sizing:border-box} body{margin:0;background:#f4f4fb;color:#1e2444;font:16px/1.55 system-ui,sans-serif}
+header{background:#252653;color:white;padding:2.4rem max(1rem,calc((100vw - 63rem)/2))}
+header p{margin:0;color:#d4d3ff} h1{margin:.2rem 0;font-size:clamp(2rem,5vw,3.4rem)}
+main{max-width:65rem;margin:auto;padding:1rem} .panel{background:white;padding:1.2rem;border-radius:14px;margin:1rem 0}
+.controls,.kpis{display:flex;flex-wrap:wrap;gap:1rem} label,.kpis div{flex:1 1 10rem}
+select{display:block;width:100%;padding:.55rem;color:inherit;background:#f8f8ff;border:1px solid #a4a8c1;border-radius:6px;font:inherit}
+.kpis strong{display:block;font-size:1.65rem;color:#35309b} table{width:100%;border-collapse:collapse}
+th,td{text-align:right;padding:.6rem;border-bottom:1px solid #e8e8f5} th:first-child,td:first-child{text-align:left}
+tbody tr:hover{background:#f7f6ff} meter{width:100%;min-width:3rem} .chart{width:30%}
+h2{margin-top:0} footer{color:#454867} .table-scroll{overflow:auto}
+</style>
+<header><p>DUCKDB · LABORATORIO OLAP</p><h1>Explorador de ventas</h1><p>120 000 pedidos sintéticos de 2025 · 144 celdas agregadas</p></header>
+<main>
+<section class="panel"><h2>Segmentar el cubo</h2><div class="controls">
+<label>Mes<select id="month"></select></label>
+<label>Región<select id="region"></select></label>
+<label>Categoría<select id="category"></select></label>
+<label>Agrupar por<select id="group"><option value="0">Mes</option><option value="1">Región</option><option value="2">Categoría</option></select></label>
+<label>Métrica del gráfico<select id="metric"><option value="1">Ingresos</option><option value="0">Pedidos</option><option value="2">Unidades</option></select></label>
+</div></section>
+<section class="panel kpis" aria-label="Totales de la selección" aria-live="polite">
+<div>Pedidos<strong id="orders"></strong></div><div>Ingresos<strong id="revenue"></strong></div><div>Unidades<strong id="units"></strong></div>
+</section>
+<section class="panel"><h2>Desglose</h2><div class="table-scroll"><table>
+<thead><tr><th scope="col">Grupo</th><th scope="col">Pedidos</th><th scope="col">Ingresos</th><th scope="col">Unidades</th><th scope="col" class="chart" id="chart-label">Ingresos</th></tr></thead>
+<tbody id="rows"></tbody></table></div></section>
+<footer>Datos simulados. Los ingresos se muestran en USD. DuckDB agrega los pedidos durante la compilación. El navegador consulta las celdas del cubo sin descargar las transacciones.</footer>
+</main>
+<script type="application/json" id="cube">__CUBE__</script>
+<script>
+const cube = JSON.parse(document.querySelector('#cube').textContent);
+const filters = ['month', 'region', 'category'].map(id => document.getElementById(id));
+const group = document.getElementById('group');
+const metric = document.getElementById('metric');
+const integer = new Intl.NumberFormat('es-PE');
+const money = new Intl.NumberFormat('es-PE', {style: 'currency', currency: 'USD'});
+const format = [value => integer.format(value), value => money.format(value / 100), value => integer.format(value)];
+
+filters.forEach((filter, index) => {
+  filter.add(new Option('Todos', ''));
+  for (const label of [...new Set(cube.map(row => row[index]))].sort()) {
+    filter.add(new Option(label, label));
+  }
+});
+
+function render() {
+  const groups = new Map();
+  const totals = [0, 0, 0];
+  for (const row of cube) {
+    if (!filters.every((filter, index) => !filter.value || filter.value === row[index])) continue;
+    const label = row[Number(group.value)];
+    const values = groups.get(label) ?? [0, 0, 0];
+    for (let index = 0; index < 3; index++) {
+      values[index] += row[index + 3];
+      totals[index] += row[index + 3];
+    }
+    groups.set(label, values);
+  }
+  ['orders', 'revenue', 'units'].forEach((id, index) => {
+    document.getElementById(id).textContent = format[index](totals[index]);
+  });
+  const metricIndex = Number(metric.value);
+  document.getElementById('chart-label').textContent = metric.selectedOptions[0].text;
+  const max = Math.max(1, ...Array.from(groups.values(), values => values[metricIndex]));
+  const body = document.getElementById('rows');
+  body.replaceChildren();
+  for (const label of [...groups.keys()].sort()) {
+    const values = groups.get(label);
+    const row = body.insertRow();
+    const heading = document.createElement('th');
+    heading.scope = 'row';
+    heading.textContent = label;
+    row.append(heading);
+    values.forEach((value, index) => { row.insertCell().textContent = format[index](value); });
+    const bar = document.createElement('meter');
+    bar.max = max;
+    bar.value = values[metricIndex];
+    bar.setAttribute('aria-label', metric.selectedOptions[0].text + ' de ' + label);
+    row.insertCell().append(bar);
+  }
+}
+for (const control of [...filters, group, metric]) control.addEventListener('change', render);
+render();
+</script>
+</html>
